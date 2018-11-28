@@ -1,7 +1,6 @@
 package me.shouheng.notepal.fragment;
 
 import android.app.Activity;
-import android.arch.lifecycle.ViewModelProviders;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -28,15 +27,18 @@ import java.util.List;
 import java.util.Objects;
 
 import me.shouheng.commons.activity.PermissionActivity;
+import me.shouheng.commons.fragment.CommonFragment;
 import me.shouheng.commons.interaction.BackEventResolver;
 import me.shouheng.commons.utils.ColorUtils;
 import me.shouheng.commons.utils.LogUtils;
 import me.shouheng.commons.utils.PermissionUtils;
 import me.shouheng.commons.utils.StringUtils;
+import me.shouheng.commons.utils.ToastUtils;
 import me.shouheng.commons.utils.ViewUtils;
 import me.shouheng.easymark.editor.Format;
 import me.shouheng.notepal.PalmApp;
 import me.shouheng.notepal.R;
+import me.shouheng.notepal.activity.MainActivity;
 import me.shouheng.notepal.activity.MenuSortActivity;
 import me.shouheng.notepal.async.CreateAttachmentTask;
 import me.shouheng.notepal.config.Constants;
@@ -46,7 +48,6 @@ import me.shouheng.notepal.dialog.LinkInputDialog;
 import me.shouheng.notepal.dialog.MathJaxEditor;
 import me.shouheng.notepal.dialog.TableInputDialog;
 import me.shouheng.notepal.dialog.picker.NotebookPickerDialog;
-import me.shouheng.notepal.fragment.base.BaseModelFragment;
 import me.shouheng.notepal.model.Attachment;
 import me.shouheng.notepal.model.Category;
 import me.shouheng.notepal.model.Location;
@@ -55,49 +56,61 @@ import me.shouheng.notepal.model.enums.ModelType;
 import me.shouheng.notepal.util.AttachmentHelper;
 import me.shouheng.notepal.util.FileHelper;
 import me.shouheng.notepal.util.ModelHelper;
-import me.shouheng.commons.utils.ToastUtils;
 import me.shouheng.notepal.util.preferences.PrefUtils;
-import me.shouheng.notepal.viewmodel.AttachmentViewModel;
 import me.shouheng.notepal.viewmodel.BaseViewModel;
 import me.shouheng.notepal.viewmodel.CategoryViewModel;
-import me.shouheng.notepal.viewmodel.LocationViewModel;
-import me.shouheng.notepal.viewmodel.NoteViewModel;
-import me.shouheng.notepal.viewmodel.NotebookViewModel;
+import me.shouheng.notepal.vm.NoteViewModel;
 import me.shouheng.notepal.widget.FlowLayout;
 import me.shouheng.notepal.widget.MDItemView;
 
 /**
- * Created by wangshouheng on 2017/5/12.*/
-public class NoteFragment extends BaseModelFragment<Note, FragmentNoteBinding> implements BackEventResolver {
+ * The fragment used to edit the note.
+ *
+ * Created by WngShhng (shouheng2015@gmail) on 2017/5/12.
+ * Refactored by WngShhng (shouheng2015@gmail.com) on 2018/11/28.
+ */
+public class NoteFragment extends CommonFragment<FragmentNoteBinding> implements BackEventResolver {
 
-    private final static String EXTRA_IS_THIRD_PART = "extra_is_third_part";
-    private final static String EXTRA_ACTION = "extra_action";
-    private final static String TAB_REPLACEMENT = "    ";
-    public final static String KEY_ARGS_RESTORE = "key_args_restore";
+    /**
+     * The key of the argument for {@link Note}. This is a required argument.
+     * The note will be used for editing in the fragment. If you don't specify this value,
+     * a new note will be created and used as default.
+     */
+    public final static String EXTRA_KEY_NOTE = "__extra_key_note";
 
-    private final int REQ_MENU_SORT = 0x0101;
+    /**
+     * The intent received from the third part which is registered in the Manifest.xml.
+     * For example the {@link Intent#ACTION_SEND} etc. The intent will be received in the
+     * {@link MainActivity} and send directly to this fragment.
+     */
+    public final static String EXTRA_KEY_THIRD_PART_INTENT = "__extra_key_third_part_intent";
 
-    private MaterialMenuDrawable materialMenu;
+    /**
+     * The action for the note fragment, same as action got from {@link Intent#getAction()}.
+     * Actions to use must be defined below, otherwise it won't be handled.
+     */
+    public final static String EXTRA_KEY_ACTION = "__extra_key_action";
+
+    /**
+     * ACTION: To create a new sketch note: create sketch at first then edi the note.
+     */
+    public final static String ACTION_ADD_SKETCH = "__action_add_sketch";
+
+    /**
+     * ACTION: To create a file note: pick files at first then edit the note.
+     */
+    public final static String ACTION_ADD_FILES = "__action_add_files";
+
+    /**
+     * ACTION: To create a photo note: take a photo at first then edit the note.
+     */
+    public final static String ACTION_TAKE_PHOTO = "__action_take_photo";
+
 
     private Note note;
     private List<Category> selections;
 
-    private NoteViewModel noteViewModel;
-    private AttachmentViewModel attachmentViewModel;
-    private LocationViewModel locationViewModel;
-    private CategoryViewModel categoryViewModel;
-    private NotebookViewModel notebookViewModel;
-
-    public static NoteFragment newInstance(Note note, boolean isThirdPart, String action) {
-        Bundle arg = new Bundle();
-        arg.putBoolean(EXTRA_IS_THIRD_PART, isThirdPart);
-        if (note == null) throw new IllegalArgumentException("Note cannot be null");
-        arg.putSerializable(Constants.EXTRA_MODEL, note);
-        if (action != null) arg.putString(EXTRA_ACTION, action);
-        NoteFragment fragment = new NoteFragment();
-        fragment.setArguments(arg);
-        return fragment;
-    }
+    private NoteViewModel viewModel;
 
     @Override
     protected int getLayoutResId() {
@@ -106,56 +119,50 @@ public class NoteFragment extends BaseModelFragment<Note, FragmentNoteBinding> i
 
     @Override
     protected void doCreateView(Bundle savedInstanceState) {
-        noteViewModel = ViewModelProviders.of(this).get(NoteViewModel.class);
-        locationViewModel = ViewModelProviders.of(this).get(LocationViewModel.class);
-        attachmentViewModel = ViewModelProviders.of(this).get(AttachmentViewModel.class);
-        categoryViewModel = ViewModelProviders.of(this).get(CategoryViewModel.class);
-        notebookViewModel = ViewModelProviders.of(this).get(NotebookViewModel.class);
-
+        viewModel = getViewModel(NoteViewModel.class);
         handleArguments();
-
         configToolbar();
+        configViews();
+    }
 
-        // Notify that the content is changed if the note fragment is called from sharing and other third part
-        // The code must be here since the material menu might be null.
-        if (getArguments() != null && getArguments().getBoolean(EXTRA_IS_THIRD_PART)) {
-            setContentChanged();
+    private void handleArguments() {
+        Bundle args = getArguments();
+
+        /* Check the existence of the note to edit. */
+        if (args == null) {
+            if (getActivity() != null) getActivity().finish();
+        } else {
+            if (!args.containsKey(EXTRA_KEY_NOTE)) {
+                note=
+            }
         }
 
-        // Sync methods. Note that the other data may not be fetched for current.
-        configMain(note);
-    }
-
-    @Override
-    protected String umengPageName() {
-        return "NoteEditFragment";
-    }
-
-    // region handle arguments
-    private void handleArguments() {
-        Bundle arguments = getArguments();
-
-        // Check arguments
-        if (arguments == null
-                || !arguments.containsKey(Constants.EXTRA_MODEL)
-                || (note = (Note) arguments.getSerializable(Constants.EXTRA_MODEL)) == null) {
+        if (args == null
+                || !args.containsKey(EXTRA_KEY_NOTE)
+                || (note = (Note) args.getSerializable(EXTRA_KEY_NOTE)) == null) {
             ToastUtils.makeToast(R.string.text_no_such_note);
-            if (getActivity() != null) getActivity().finish();
+
             return;
         }
 
-        // Handle arguments for intent from third part
-        if (arguments.getBoolean(EXTRA_IS_THIRD_PART)) {
+        if (args.containsKey(EXTRA_KEY_THIRD_PART_INTENT)) {
+            Intent intent = args.getParcelable(EXTRA_KEY_THIRD_PART_INTENT);
+        }
+
+
+
+        // Handle args for intent from third part
+        if (args.getBoolean(EXTRA_IS_THIRD_PART)) {
             handleThirdPart();
-        } else if(Constants.ACTION_ADD_SKETCH.equals(arguments.getString(EXTRA_ACTION))) {
+        } else if(Constants.ACTION_ADD_SKETCH.equals(args.getString(EXTRA_ACTION))) {
             if (getActivity() != null) {
                 PermissionUtils.checkStoragePermission((PermissionActivity) getActivity(), () -> AttachmentHelper.sketch(this));
             }
-        } else if (Constants.ACTION_TAKE_PHOTO.equals(arguments.getString(EXTRA_ACTION))) {
+        } else if (Constants.ACTION_TAKE_PHOTO.equals(args.getString(EXTRA_ACTION))) {
             if (getActivity() != null) {
                 PermissionUtils.checkStoragePermission((PermissionActivity) getActivity(), () -> AttachmentHelper.capture(this));
             }
-        } else if (Constants.ACTION_ADD_FILES.equals(arguments.getString(EXTRA_ACTION))) {
+        } else if (Constants.ACTION_ADD_FILES.equals(args.getString(EXTRA_ACTION))) {
             if (getActivity() != null) {
                 PermissionUtils.checkStoragePermission((PermissionActivity) getActivity(), () -> AttachmentHelper.pickFiles(this));
             }
@@ -166,43 +173,41 @@ public class NoteFragment extends BaseModelFragment<Note, FragmentNoteBinding> i
     }
 
     private void handleThirdPart() {
-        if (!(getActivity() instanceof OnNoteInteractListener)) return;
-
-        Intent intent = ((OnNoteInteractListener) getActivity()).getIntentForThirdPart();
-
-        String title = intent.getStringExtra(Intent.EXTRA_SUBJECT);
-        note.setTitle(title);
-
-        String content = intent.getStringExtra(Intent.EXTRA_TEXT);
-        if (!TextUtils.isEmpty(content)) {
-            content = content.replace("\t", TAB_REPLACEMENT);
-        }
-        note.setContent(content);
-
-        // Single attachment data
-        Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-
-        // Due to the fact that Google Now passes intent as text but with
-        // audio recording attached the case must be handled in specific way
-        if (uri != null && !Constants.INTENT_GOOGLE_NOW.equals(intent.getAction())) {
-            new CreateAttachmentTask(this, uri, this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-        }
-
-        // Multiple attachment data
-        ArrayList<Uri> uris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-        if (uris != null) {
-            for (Uri uriSingle : uris) {
-                new CreateAttachmentTask(this, uriSingle, this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-            }
-        }
+//        if (!(getActivity() instanceof OnNoteInteractListener)) return;
+//
+//        Intent intent = ((OnNoteInteractListener) getActivity()).getIntentForThirdPart();
+//
+//        String title = intent.getStringExtra(Intent.EXTRA_SUBJECT);
+//        note.setTitle(title);
+//
+//        String content = intent.getStringExtra(Intent.EXTRA_TEXT);
+//        if (!TextUtils.isEmpty(content)) {
+//            content = content.replace("\t", TAB_REPLACEMENT);
+//        }
+//        note.setContent(content);
+//
+//        // Single attachment data
+//        Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+//
+//        // Due to the fact that Google Now passes intent as text but with
+//        // audio recording attached the case must be handled in specific way
+//        if (uri != null && !Constants.INTENT_GOOGLE_NOW.equals(intent.getAction())) {
+//            new CreateAttachmentTask(this, uri, this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+//        }
+//
+//        // Multiple attachment data
+//        ArrayList<Uri> uris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+//        if (uris != null) {
+//            for (Uri uriSingle : uris) {
+//                new CreateAttachmentTask(this, uriSingle, this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+//            }
+//        }
     }
     // endregion
 
     private void configToolbar() {
         if (getContext() == null || getActivity() == null) return;
 
-        materialMenu = new MaterialMenuDrawable(getContext(), accentColor(), MaterialMenuDrawable.Stroke.THIN);
-        materialMenu.setIconState(MaterialMenuDrawable.IconState.ARROW);
         getBinding().toolbar.setNavigationIcon(materialMenu);
         ((AppCompatActivity) getActivity()).setSupportActionBar(getBinding().toolbar);
         ActionBar ab = ((AppCompatActivity) getActivity()).getSupportActionBar();
@@ -283,7 +288,7 @@ public class NoteFragment extends BaseModelFragment<Note, FragmentNoteBinding> i
     // endregion
 
     // region Config main board
-    private void configMain(Note note) {
+    private void configViews() {
         getBinding().etTitle.setText(TextUtils.isEmpty(note.getTitle()) ? "" : note.getTitle());
         getBinding().etTitle.setTextColor(accentColor());
         getBinding().etTitle.addTextChangedListener(titleWatcher);
@@ -610,6 +615,11 @@ public class NoteFragment extends BaseModelFragment<Note, FragmentNoteBinding> i
     @Override
     public void resolve() {
         onBack();
+    }
+
+    @Override
+    protected String umengPageName() {
+        return "NoteEditFragment";
     }
 
     public interface OnNoteInteractListener {

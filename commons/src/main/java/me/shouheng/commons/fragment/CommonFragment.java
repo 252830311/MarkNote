@@ -1,6 +1,8 @@
 package me.shouheng.commons.fragment;
 
 import android.annotation.TargetApi;
+import android.arch.lifecycle.ViewModel;
+import android.arch.lifecycle.ViewModelProviders;
 import android.databinding.DataBindingUtil;
 import android.databinding.ViewDataBinding;
 import android.os.Build;
@@ -18,10 +20,10 @@ import com.umeng.analytics.MobclickAgent;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.Consumer;
 import me.shouheng.commons.event.RxBus;
+import me.shouheng.commons.theme.ThemeStyle;
 import me.shouheng.commons.theme.ThemeUtils;
 import me.shouheng.commons.utils.ColorUtils;
 import me.shouheng.commons.utils.LogUtils;
-import me.shouheng.commons.theme.ThemeStyle;
 
 /**
  * Created by wang shouheng on 2017/12/23. */
@@ -79,6 +81,14 @@ public abstract class CommonFragment<T extends ViewDataBinding> extends Fragment
     public void onPrepareOptionsMenu(Menu menu) {
         super.onPrepareOptionsMenu(menu);
         ThemeUtils.themeMenu(menu, getThemeStyle().isDarkTheme);
+    }
+
+    protected <VM extends ViewModel> VM getViewModel(@NonNull Class<VM> modelClass) {
+        return ViewModelProviders.of(this).get(modelClass);
+    }
+
+    protected <VM extends ViewModel> VM getSharedViewModel(@NonNull Class<VM> modelClass) {
+        return ViewModelProviders.of(getActivity()).get(modelClass);
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)

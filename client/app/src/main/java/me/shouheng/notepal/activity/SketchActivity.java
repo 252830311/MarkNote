@@ -35,7 +35,8 @@ import me.shouheng.notepal.R;
 import me.shouheng.notepal.databinding.ActivitySketchBinding;
 
 /**
- * The activity used to sketch
+ * The activity used to sketch.
+ * TODO Consider to replace the material menu.
  *
  * refactored at 2018-11-28, 23:12,
  * by WngShhng (shouheng2015@gmail.com)
